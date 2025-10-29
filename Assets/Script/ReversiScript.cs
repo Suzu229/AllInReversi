@@ -1,14 +1,26 @@
 using System.Diagnostics.Tracing;
 using UnityEngine;
+using UnityEngine.InputSystem;
+using System.Threading;
 
 public class ReversiScript : MonoBehaviour
 {
 
     // Copy Reversi pieces in 8 by 8 arrangement and display them
     public GameObject ReversiSplite;
+    public GameObject Cube;
 
     const int FIELD_SIZE_X = 8;
     const int FIELD_SIZE_Y = 8;
+
+    const int CUBE_MIN_X = 0, CUBE_MAX_X = 7;
+    const int CUBE_MIN_Y = 0, CUBE_MAX_Y = 7;
+    const float CUBE_STEP = 1.01f;
+    // Fix the cursor's height so it stays aligned with the board
+    const float CUBE_FIXED_Y = -0.178f;
+
+    int cube_gridX = 0, cube_gridY = 0;
+
 
     public enum spriteState
     {
@@ -40,17 +52,37 @@ public class ReversiScript : MonoBehaviour
         _FieldState[3, 4] = spriteState.White;
         _FieldState[4, 3] = spriteState.White;
         _FieldState[4, 4] = spriteState.Black;
+
+        ApplyCubePosition();
     }
 
     // Update is called once per frame
     void Update()
     {
+        var k = Keyboard.current;
+
+        if (k.rightArrowKey.wasPressedThisFrame && cube_gridX < CUBE_MAX_X)
+            cube_gridX++;
+        else if (k.leftArrowKey.wasPressedThisFrame && cube_gridX > CUBE_MIN_X)
+            cube_gridX--;
+        else if (k.upArrowKey.wasPressedThisFrame && cube_gridY < CUBE_MAX_Y)
+            cube_gridY++;
+        else if (k.downArrowKey.wasPressedThisFrame && cube_gridY > CUBE_MIN_Y)
+            cube_gridY--;
+
+        ApplyCubePosition();
+
         for (int x = 0; x < FIELD_SIZE_X; x++)
-        {
-            for (int y = 0; y < FIELD_SIZE_X; y++)
             {
-                _FieldSpriteState[x, y].SetState(_FieldState[x, y]);
+                for (int y = 0; y < FIELD_SIZE_X; y++)
+                {
+                    _FieldSpriteState[x, y].SetState(_FieldState[x, y]);
+                }
             }
-        }
+    }
+
+    void ApplyCubePosition()
+    {
+        Cube.transform.localPosition = new Vector3(cube_gridX * CUBE_STEP, CUBE_FIXED_Y, cube_gridY * CUBE_STEP);
     }
 }
