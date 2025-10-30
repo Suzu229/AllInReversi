@@ -17,6 +17,10 @@ public class SpriteScript : MonoBehaviour
 
     public void SetState(ReversiScript.spriteState spriteState)
     {
+        var isActive = spriteState != ReversiScript.spriteState.None;
+        gameObject.SetActive(isActive);
+
+
         if (spriteState == ReversiScript.spriteState.White)
         {
             gameObject.transform.rotation = Quaternion.Euler(90, 0, 0);

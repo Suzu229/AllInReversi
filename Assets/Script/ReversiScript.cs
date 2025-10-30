@@ -29,6 +29,8 @@ public class ReversiScript : MonoBehaviour
         Black
     }
 
+    private spriteState _PlayerTurn = spriteState.Black;
+
     private spriteState[,] _FieldState = new spriteState[FIELD_SIZE_X, FIELD_SIZE_Y];
     // Make the spriteScript class objects available.
     private SpriteScript[,] _FieldSpriteState = new SpriteScript[FIELD_SIZE_X, FIELD_SIZE_Y];
@@ -40,7 +42,7 @@ public class ReversiScript : MonoBehaviour
         {
             for (int y = 0; y < FIELD_SIZE_X; y++)
             {
-                var sprite = Instantiate(ReversiSplite, new Vector3(1.01f * x, 0, 1.01f * y), Quaternion.Euler(90, 0,0));
+                var sprite = Instantiate(ReversiSplite, new Vector3(1.01f * x, 0, 1.01f * y), Quaternion.Euler(90, 0, 0));
 
                 _FieldState[x, y] = spriteState.None;
 
@@ -72,13 +74,18 @@ public class ReversiScript : MonoBehaviour
 
         ApplyCubePosition();
 
+        if (k.enterKey.wasPressedThisFrame)
+        {
+            _FieldState[cube_gridX, cube_gridY] = _PlayerTurn;
+            _PlayerTurn = _PlayerTurn == spriteState.Black ? spriteState.White : spriteState.Black;
+        }
         for (int x = 0; x < FIELD_SIZE_X; x++)
+        {
+            for (int y = 0; y < FIELD_SIZE_X; y++)
             {
-                for (int y = 0; y < FIELD_SIZE_X; y++)
-                {
-                    _FieldSpriteState[x, y].SetState(_FieldState[x, y]);
-                }
+                _FieldSpriteState[x, y].SetState(_FieldState[x, y]);
             }
+        }
     }
 
     void ApplyCubePosition()
