@@ -91,7 +91,7 @@ public class ReversiScript : MonoBehaviour
                 }
             }
 
-            if (turncheck)
+            if (turncheck && _FieldState[cube_gridX, cube_gridY] == spriteState.None)
             {
                 foreach (var info in _InfoList)
                 {
@@ -106,18 +106,58 @@ public class ReversiScript : MonoBehaviour
             }
 
         }
+        UpdateBoard();
+    }
+
+    private void ApplyCubePosition()
+    {
+        Cube.transform.localPosition = new Vector3(cube_gridX * CUBE_STEP, CUBE_FIXED_Y, cube_gridY * CUBE_STEP);
+    }
+
+    private void UpdateBoard()
+    {
+        int total = FIELD_SIZE_X * FIELD_SIZE_Y;
+        var whiteCount = default(int);
+        var blackCount = default(int);
+
         for (int x = 0; x < FIELD_SIZE_X; x++)
         {
             for (int y = 0; y < FIELD_SIZE_Y; y++)
             {
                 _FieldSpriteState[x, y].SetState(_FieldState[x, y]);
+
+                if (_FieldState[x, y] == spriteState.White)
+                    whiteCount++;
+                else if (_FieldState[x, y] == spriteState.Black)
+                    blackCount++;
             }
         }
+        if(whiteCount + blackCount == total)
+            ResetBoard();
+
     }
 
-    void ApplyCubePosition()
+    private void ResetBoard()
     {
-        Cube.transform.localPosition = new Vector3(cube_gridX * CUBE_STEP, CUBE_FIXED_Y, cube_gridY * CUBE_STEP);
+        for (int x = 0; x < FIELD_SIZE_X; x++)
+        {
+            for (int y = 0; y < FIELD_SIZE_Y; y++)
+            {
+                _FieldState[x, y] = spriteState.None;
+            }
+        }
+        _FieldState[3, 3] = spriteState.Black;
+        _FieldState[3, 4] = spriteState.White;
+        _FieldState[4, 3] = spriteState.White;
+        _FieldState[4, 4] = spriteState.Black;
+
+        _InfoList.Clear();
+        _PlayerTurn = spriteState.Black;
+
+        cube_gridX = 0;
+        cube_gridY = 0;
+
+        ApplyCubePosition();
     }
 
     private bool TurnCheck(int direction)
