@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics.Tracing;
 using System.Threading;
 using System.Xml.Serialization;
+using UnityEditor;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
@@ -23,6 +24,9 @@ public class ReversiScript : MonoBehaviour
     const float CUBE_FIXED_Y = -0.178f;
 
     int cube_gridX = 0, cube_gridY = 0;
+
+    private bool _BlackCheckFlag = false;
+    private bool _WhiteCheckFlag = false;
 
     private List<(int, int)> _InfoList = new List<(int, int)>();
 
@@ -86,9 +90,7 @@ public class ReversiScript : MonoBehaviour
             for (int i = 0; i <= 7; i++)
             {
                 if (TurnCheck(i))
-                {
                     turncheck = true;
-                }
             }
 
             if (turncheck && _FieldState[cube_gridX, cube_gridY] == spriteState.None)
@@ -102,10 +104,54 @@ public class ReversiScript : MonoBehaviour
 
                 _FieldState[cube_gridX, cube_gridY] = _PlayerTurn;
                 _PlayerTurn = _PlayerTurn == spriteState.Black ? spriteState.White : spriteState.Black;
-                _InfoList.Clear();
             }
 
         }
+        _InfoList.Clear();
+
+        turncheck = false;
+        for (int x = 0; x < FIELD_SIZE_X; x++)
+        {
+            for (int y = 0; y < FIELD_SIZE_Y; y++)
+            {
+                for (int i = 0; i <= 7; i++)
+                {
+                    if (TurnCheck(i, x, y) && _FieldState[x, y] == spriteState.None)
+                    {
+                        if (_PlayerTurn == spriteState.Black)
+                        {
+                            turncheck = true;
+                            _BlackCheckFlag = true;
+
+                            if (!_WhiteCheckFlag)
+                                _WhiteCheckFlag = false;
+                            break;
+                        }
+                        else if (_PlayerTurn == spriteState.White)
+                        {
+                            turncheck = true;
+                            _WhiteCheckFlag = true;
+
+                            if (!_BlackCheckFlag)
+                                _BlackCheckFlag = false;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        // •‚©”’‚©‚ÌŽè”Ô‚ÌŽž‚É1‚à’u‚¯‚éêŠ‚ª‚È‚©‚Á‚½ê‡
+        if (!turncheck)
+        {
+            if(_PlayerTurn == spriteState.Black)
+                _BlackCheckFlag = false;
+            else if(_PlayerTurn == spriteState.White)
+                _BlackCheckFlag = false;
+
+            _PlayerTurn = _PlayerTurn == spriteState.Black ? spriteState.White : spriteState.Black;
+        }
+        _InfoList.Clear();
         UpdateBoard();
     }
 
@@ -132,7 +178,7 @@ public class ReversiScript : MonoBehaviour
                     blackCount++;
             }
         }
-        if(whiteCount + blackCount == total)
+        if (whiteCount + blackCount == total || !_BlackCheckFlag && !_WhiteCheckFlag)
             ResetBoard();
 
     }
@@ -158,6 +204,69 @@ public class ReversiScript : MonoBehaviour
         cube_gridY = 0;
 
         ApplyCubePosition();
+    }
+
+    private bool TurnCheck(int direction, int field_size_x, int field_size_y)
+    {
+        var turnCheck = false;
+
+        var x = field_size_x;
+        var y = field_size_y;
+
+        var OpponentPlayerTurn = _PlayerTurn == spriteState.Black ? spriteState.White : spriteState.Black;
+        var infoList = new List<(int, int)>();
+
+        // Direction vectors
+        (int dx, int dy) = direction switch
+        {
+            0 => (-1, 0), // Left
+            1 => (1, 0), // Right
+            2 => (0, -1), // Down
+            3 => (0, 1), // Up
+            4 => (1, 1), // Upper Right
+            5 => (-1, -1), // Lower Left
+            6 => (-1, 1), // Upper Right
+            7 => (1, -1), // Lower Right
+            _ => (0, 0),
+        };
+
+        // Check by moving along each direction
+        while (true)
+        {
+            // Check if next position is outside the board before moving
+            int nx = x + dx;
+            int ny = y + dy;
+            if (nx < 0 || nx >= FIELD_SIZE_X || ny < 0 || ny >= FIELD_SIZE_Y)
+                break;
+
+            x = nx; y = ny;
+            var cell = _FieldState[x, y];
+
+            // Opponent piece -> store as flip candidate
+            if (cell == OpponentPlayerTurn)
+            {
+                infoList.Add((x, y));
+                continue;
+            }
+
+            // If no flipped pieces yet and reached own piece or empty -> cannot place
+            if (infoList.Count == 0 && (cell == _PlayerTurn || cell == spriteState.None))
+                break;
+
+            // Reached own piece -> success if opponent pieces were sandwiched
+            if (cell == _PlayerTurn)
+            {
+                turnCheck = infoList.Count > 0;
+                if (turnCheck)
+                    _InfoList.AddRange(infoList); //Add to flip list
+                break;
+            }
+
+            // Reached empty cell -> cannot place
+            if (cell == spriteState.None)
+                break;
+        }
+        return turnCheck;
     }
 
     private bool TurnCheck(int direction)
