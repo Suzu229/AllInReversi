@@ -1,9 +1,4 @@
-using NUnit.Framework;
 using System.Collections.Generic;
-using System.Diagnostics.Tracing;
-using System.Threading;
-using System.Xml.Serialization;
-using UnityEditor;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
@@ -11,7 +6,7 @@ public class ReversiScript : MonoBehaviour
 {
 
     // Copy Reversi pieces in 8 by 8 arrangement and display them
-    public GameObject ReversiSplite;
+    public GameObject ReversiSprite;
     public GameObject Cube;
 
     const int FIELD_SIZE_X = 8;
@@ -25,10 +20,10 @@ public class ReversiScript : MonoBehaviour
 
     int cube_gridX = 0, cube_gridY = 0;
 
-    private bool _BlackCheckFlag = false;
-    private bool _WhiteCheckFlag = false;
-
-    private List<(int, int)> _InfoList = new List<(int, int)>();
+    private static readonly (int dx, int dy)[] DIRS = new (int, int)[]
+    {
+        (-1,0), (1,0),(0,-1),(0,1),(1,1),(-1,-1),(-1,1),(1,-1)
+    };
 
     public enum spriteState
     {
@@ -38,9 +33,10 @@ public class ReversiScript : MonoBehaviour
     }
 
     private spriteState _PlayerTurn = spriteState.Black;
-
+    // board state
     private spriteState[,] _FieldState = new spriteState[FIELD_SIZE_X, FIELD_SIZE_Y];
     // Make the spriteScript class objects available.
+    // the piece object displayed on the screen
     private SpriteScript[,] _FieldSpriteState = new SpriteScript[FIELD_SIZE_X, FIELD_SIZE_Y];
 
     // Start is called once before the first execution of Update after the MonoBehaviour is created
@@ -50,20 +46,22 @@ public class ReversiScript : MonoBehaviour
         {
             for (int y = 0; y < FIELD_SIZE_Y; y++)
             {
-                var sprite = Instantiate(ReversiSplite, new Vector3(1.01f * x, 0, 1.01f * y), Quaternion.Euler(90, 0, 0));
-
-                _FieldState[x, y] = spriteState.None;
-
+                var sprite = Instantiate(ReversiSprite, new Vector3(CUBE_STEP * x, 0f, CUBE_STEP * y), Quaternion.Euler(90, 0, 0));
                 // Assign each spritefs component for SpriteScript class.
                 _FieldSpriteState[x, y] = sprite.GetComponent<SpriteScript>();
+                _FieldState[x, y] = spriteState.None;
             }
         }
+        // starting position
         _FieldState[3, 3] = spriteState.Black;
         _FieldState[3, 4] = spriteState.White;
         _FieldState[4, 3] = spriteState.White;
         _FieldState[4, 4] = spriteState.Black;
 
+        cube_gridX = 0;
+        cube_gridY = 0;
         ApplyCubePosition();
+        RefreshSprites();
     }
 
     // Update is called once per frame
@@ -82,253 +80,163 @@ public class ReversiScript : MonoBehaviour
             cube_gridY--;
         #endregion
 
+        // place a piece
+        if (k.enterKey.wasPressedThisFrame || k.numpadEnterKey.wasPressedThisFrame)
+            PlaceAt(cube_gridX, cube_gridY);
+
         ApplyCubePosition();
+        RefreshSprites();
 
-        var turncheck = false;
-        if (k.enterKey.wasPressedThisFrame)
-        {
-            for (int i = 0; i <= 7; i++)
-            {
-                if (TurnCheck(i))
-                    turncheck = true;
-            }
-
-            if (turncheck && _FieldState[cube_gridX, cube_gridY] == spriteState.None)
-            {
-                foreach (var info in _InfoList)
-                {
-                    var cube_gridX = info.Item1;
-                    var cube_gridY = info.Item2;
-                    _FieldState[cube_gridX, cube_gridY] = _PlayerTurn;
-                }
-
-                _FieldState[cube_gridX, cube_gridY] = _PlayerTurn;
-                _PlayerTurn = _PlayerTurn == spriteState.Black ? spriteState.White : spriteState.Black;
-            }
-
-        }
-        _InfoList.Clear();
-
-        turncheck = false;
-        for (int x = 0; x < FIELD_SIZE_X; x++)
-        {
-            for (int y = 0; y < FIELD_SIZE_Y; y++)
-            {
-                for (int i = 0; i <= 7; i++)
-                {
-                    if (TurnCheck(i, x, y) && _FieldState[x, y] == spriteState.None)
-                    {
-                        if (_PlayerTurn == spriteState.Black)
-                        {
-                            turncheck = true;
-                            _BlackCheckFlag = true;
-
-                            if (!_WhiteCheckFlag)
-                                _WhiteCheckFlag = false;
-                            break;
-                        }
-                        else if (_PlayerTurn == spriteState.White)
-                        {
-                            turncheck = true;
-                            _WhiteCheckFlag = true;
-
-                            if (!_BlackCheckFlag)
-                                _BlackCheckFlag = false;
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-
-        // •‚©”’‚©‚ÌŽè”Ô‚ÌŽž‚É1‚à’u‚¯‚éêŠ‚ª‚È‚©‚Á‚½ê‡
-        if (!turncheck)
-        {
-            if(_PlayerTurn == spriteState.Black)
-                _BlackCheckFlag = false;
-            else if(_PlayerTurn == spriteState.White)
-                _BlackCheckFlag = false;
-
-            _PlayerTurn = _PlayerTurn == spriteState.Black ? spriteState.White : spriteState.Black;
-        }
-        _InfoList.Clear();
-        UpdateBoard();
+        // board is full (end of game)
+        var (w, b) = CountPieces();
+        if (w + b == FIELD_SIZE_X * FIELD_SIZE_Y)
+            ResetBoard();
     }
 
+    #region Core
+    private bool CanPlaceAt(int x, int y, spriteState color, List<(int, int)> flips)
+    {
+        if (_FieldState[x, y] != spriteState.None)
+            return false;
+
+        flips.Clear();
+        foreach (var (dx, dy) in DIRS)
+            GatherFlipsFrom(x, y, dx, dy, color, flips);
+
+        return true;
+    }
+
+    // the process of collecting the pieces that can be flipped in that direction(by one line)
+    private void GatherFlipsFrom(int x, int y, int dx, int dy, spriteState color, List<(int, int)> flips)
+    {
+        // current position
+        int cx = x, cy = y;
+        var opp = (color == spriteState.Black) ? spriteState.White : spriteState.Black;
+
+        List<(int, int)> tmp = new();
+
+        while (true)
+        {
+            // the coordinates of the next square to examine
+            int nx = cx + dx, ny = cy + dy;
+            if (nx < 0 || nx >= FIELD_SIZE_X || ny < 0 || ny >= FIELD_SIZE_Y)
+                return;
+
+            var cell = _FieldState[nx, ny];
+
+            if (cell == opp)
+            {
+                tmp.Add((nx, ny));
+                cx = nx;
+                cy = ny;
+                continue;
+            }
+
+            if (cell == spriteState.None)
+                return;
+
+            // reached your own color: confirmed if at least one opponent piece is sandwiched
+            if (cell == color)
+            {
+                if (tmp.Count > 0)
+                    flips.AddRange(tmp);
+            }
+            return;
+        }
+    }
+
+    private void PlaceAt(int x, int y)
+    {
+        var flips = new List<(int, int)>();
+        if (!CanPlaceAt(x, y, _PlayerTurn, flips))
+            return;
+
+        // flip and place
+        foreach (var p in flips)
+            _FieldState[p.Item1, p.Item2] = _PlayerTurn;
+
+        // switch turns
+        _PlayerTurn = (_PlayerTurn == spriteState.Black) ? spriteState.White : spriteState.Black;
+
+        // Pass check: if the opp has no valid moves, return the my turn;
+        // if neither can move, end the game.
+        bool oppHas = HasLegalMove(_PlayerTurn);
+        bool meHas = HasLegalMove((_PlayerTurn == spriteState.Black) ? spriteState.White : spriteState.Black);
+
+        if (!oppHas && meHas)
+        {
+            // return the turn if the opp passes
+            _PlayerTurn = (_PlayerTurn == spriteState.Black) ? spriteState.White : spriteState.Black;
+        }
+        else if (!oppHas && !meHas)
+        {
+            // game over
+            ResetBoard();
+        }
+    }
+
+    private bool HasLegalMove(spriteState color)
+    {
+        var flips = new List<(int, int)>();
+        for (int x = 0; x < FIELD_SIZE_X; x++)
+            for (int y = 0; y < FIELD_SIZE_Y; y++)
+                if (CanPlaceAt(x, x, color, flips))
+                    return true;
+        return false;
+    }
+    #endregion
+
+    #region View / Utility
     private void ApplyCubePosition()
     {
         Cube.transform.localPosition = new Vector3(cube_gridX * CUBE_STEP, CUBE_FIXED_Y, cube_gridY * CUBE_STEP);
     }
 
-    private void UpdateBoard()
+    /// <summary>
+    /// Update the appearance of the pieces on the screen according to the board state.
+    /// </summary>
+    private void RefreshSprites()
     {
-        int total = FIELD_SIZE_X * FIELD_SIZE_Y;
-        var whiteCount = default(int);
-        var blackCount = default(int);
-
         for (int x = 0; x < FIELD_SIZE_X; x++)
-        {
+            for (int y = 0; y < FIELD_SIZE_Y; y++)
+                _FieldSpriteState[x, y].SetState(_FieldState[x, y]);
+    }
+
+    private (int white, int black) CountPieces()
+    {
+        int w = 0;
+        int b = 0;
+        for (int x = 0; x < FIELD_SIZE_X; x++)
             for (int y = 0; y < FIELD_SIZE_Y; y++)
             {
-                _FieldSpriteState[x, y].SetState(_FieldState[x, y]);
-
-                if (_FieldState[x, y] == spriteState.White)
-                    whiteCount++;
-                else if (_FieldState[x, y] == spriteState.Black)
-                    blackCount++;
+                var s = _FieldState[x, y];
+                if (s == spriteState.White)
+                    w++;
+                else if (s == spriteState.Black)
+                    b++;
             }
-        }
-        if (whiteCount + blackCount == total || !_BlackCheckFlag && !_WhiteCheckFlag)
-            ResetBoard();
-
+        return (w, b);
     }
 
     private void ResetBoard()
     {
         for (int x = 0; x < FIELD_SIZE_X; x++)
-        {
             for (int y = 0; y < FIELD_SIZE_Y; y++)
-            {
                 _FieldState[x, y] = spriteState.None;
-            }
-        }
+
+
         _FieldState[3, 3] = spriteState.Black;
         _FieldState[3, 4] = spriteState.White;
         _FieldState[4, 3] = spriteState.White;
         _FieldState[4, 4] = spriteState.Black;
 
-        _InfoList.Clear();
         _PlayerTurn = spriteState.Black;
 
         cube_gridX = 0;
         cube_gridY = 0;
 
         ApplyCubePosition();
+        RefreshSprites();
     }
-
-    private bool TurnCheck(int direction, int field_size_x, int field_size_y)
-    {
-        var turnCheck = false;
-
-        var x = field_size_x;
-        var y = field_size_y;
-
-        var OpponentPlayerTurn = _PlayerTurn == spriteState.Black ? spriteState.White : spriteState.Black;
-        var infoList = new List<(int, int)>();
-
-        // Direction vectors
-        (int dx, int dy) = direction switch
-        {
-            0 => (-1, 0), // Left
-            1 => (1, 0), // Right
-            2 => (0, -1), // Down
-            3 => (0, 1), // Up
-            4 => (1, 1), // Upper Right
-            5 => (-1, -1), // Lower Left
-            6 => (-1, 1), // Upper Right
-            7 => (1, -1), // Lower Right
-            _ => (0, 0),
-        };
-
-        // Check by moving along each direction
-        while (true)
-        {
-            // Check if next position is outside the board before moving
-            int nx = x + dx;
-            int ny = y + dy;
-            if (nx < 0 || nx >= FIELD_SIZE_X || ny < 0 || ny >= FIELD_SIZE_Y)
-                break;
-
-            x = nx; y = ny;
-            var cell = _FieldState[x, y];
-
-            // Opponent piece -> store as flip candidate
-            if (cell == OpponentPlayerTurn)
-            {
-                infoList.Add((x, y));
-                continue;
-            }
-
-            // If no flipped pieces yet and reached own piece or empty -> cannot place
-            if (infoList.Count == 0 && (cell == _PlayerTurn || cell == spriteState.None))
-                break;
-
-            // Reached own piece -> success if opponent pieces were sandwiched
-            if (cell == _PlayerTurn)
-            {
-                turnCheck = infoList.Count > 0;
-                if (turnCheck)
-                    _InfoList.AddRange(infoList); //Add to flip list
-                break;
-            }
-
-            // Reached empty cell -> cannot place
-            if (cell == spriteState.None)
-                break;
-        }
-        return turnCheck;
-    }
-
-    private bool TurnCheck(int direction)
-    {
-        var turnCheck = false;
-
-        var x = cube_gridX;
-        var y = cube_gridY;
-
-        var OpponentPlayerTurn = _PlayerTurn == spriteState.Black ? spriteState.White : spriteState.Black;
-        var infoList = new List<(int, int)>();
-
-        // Direction vectors
-        (int dx, int dy) = direction switch
-        {
-            0 => (-1, 0), // Left
-            1 => (1, 0), // Right
-            2 => (0, -1), // Down
-            3 => (0, 1), // Up
-            4 => (1, 1), // Upper Right
-            5 => (-1, -1), // Lower Left
-            6 => (-1, 1), // Upper Right
-            7 => (1, -1), // Lower Right
-            _ => (0, 0),
-        };
-
-        // Check by moving along each direction
-        while (true)
-        {
-            // Check if next position is outside the board before moving
-            int nx = x + dx;
-            int ny = y + dy;
-            if (nx < 0 || nx >= FIELD_SIZE_X || ny < 0 || ny >= FIELD_SIZE_Y)
-                break;
-
-            x = nx; y = ny;
-            var cell = _FieldState[x, y];
-
-            // Opponent piece -> store as flip candidate
-            if (cell == OpponentPlayerTurn)
-            {
-                infoList.Add((x, y));
-                continue;
-            }
-
-            // If no flipped pieces yet and reached own piece or empty -> cannot place
-            if (infoList.Count == 0 && (cell == _PlayerTurn || cell == spriteState.None))
-                break;
-
-            // Reached own piece -> success if opponent pieces were sandwiched
-            if (cell == _PlayerTurn)
-            {
-                turnCheck = infoList.Count > 0;
-                if (turnCheck)
-                    _InfoList.AddRange(infoList); //Add to flip list
-                break;
-            }
-
-            // Reached empty cell -> cannot place
-            if (cell == spriteState.None)
-                break;
-        }
-        return turnCheck;
-    }
+    #endregion
 }
