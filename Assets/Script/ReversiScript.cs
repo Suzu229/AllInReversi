@@ -1,4 +1,5 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
@@ -8,6 +9,9 @@ public class ReversiScript : MonoBehaviour
     // Copy Reversi pieces in 8 by 8 arrangement and display them
     public GameObject ReversiSprite;
     public GameObject Cube;
+    public GameObject HighlightPrefab;
+
+    private readonly List<GameObject> _highlights = new(); // pool
 
     const int FIELD_SIZE_X = 8;
     const int FIELD_SIZE_Y = 8;
@@ -47,7 +51,7 @@ public class ReversiScript : MonoBehaviour
             for (int y = 0; y < FIELD_SIZE_Y; y++)
             {
                 var sprite = Instantiate(ReversiSprite, new Vector3(CUBE_STEP * x, 0f, CUBE_STEP * y), Quaternion.Euler(90, 0, 0));
-                // Assign each sprite�fs component for SpriteScript class.
+                // Assign each sprite’s component for SpriteScript class.
                 _FieldSpriteState[x, y] = sprite.GetComponent<SpriteScript>();
                 _FieldState[x, y] = spriteState.None;
             }
@@ -62,27 +66,48 @@ public class ReversiScript : MonoBehaviour
         cube_gridY = 0;
         ApplyCubePosition();
         RefreshSprites();
+        RefreshHighlights();
     }
 
     // Update is called once per frame
     void Update()
     {
         var k = Keyboard.current;
+        bool moved = false;
+        bool placed = false;
 
         #region setting coordinates
         if (k.rightArrowKey.wasPressedThisFrame && cube_gridX < CUBE_MAX_X)
+        {
             cube_gridX++;
+            moved = true;
+        }
         else if (k.leftArrowKey.wasPressedThisFrame && cube_gridX > CUBE_MIN_X)
+        {
             cube_gridX--;
+            moved = true;
+        }
         else if (k.upArrowKey.wasPressedThisFrame && cube_gridY < CUBE_MAX_Y)
+        {
             cube_gridY++;
+            moved = true;
+        }
         else if (k.downArrowKey.wasPressedThisFrame && cube_gridY > CUBE_MIN_Y)
+        {
             cube_gridY--;
+            moved = true;
+        }
         #endregion
+
+        if (moved)
+        {
+            ApplyCubePosition();
+            RefreshHighlights();
+        }
 
         // place a piece
         if (k.enterKey.wasPressedThisFrame || k.numpadEnterKey.wasPressedThisFrame)
-            PlaceAt(cube_gridX, cube_gridY);
+            placed = PlaceAt(cube_gridX, cube_gridY);
 
         ApplyCubePosition();
         RefreshSprites();
@@ -94,6 +119,16 @@ public class ReversiScript : MonoBehaviour
     }
 
     #region Core
+    /// <summary>
+    /// Checks weather a piece of the given color can be legally placed at (x, y)
+    /// If the placement is valid, this method collects the coordinates of opponent pieces
+    /// that would be flipped and stores them in the 'flips' list
+    /// </summary>
+    /// <param name="x">Board coordinate X</param>
+    /// <param name="y">Board coordinate Y</param>
+    /// <param name="color">Piece color to place</param>
+    /// <param name="flips">A list that will be populated with positions to flip if the move is valid</param>
+    /// <returns>True if the move is legal; otherwise false</returns>
     private bool CanPlaceAt(int x, int y, spriteState color, List<(int, int)> flips)
     {
         if (_FieldState[x, y] != spriteState.None)
@@ -103,7 +138,7 @@ public class ReversiScript : MonoBehaviour
         foreach (var (dx, dy) in DIRS)
             GatherFlipsFrom(x, y, dx, dy, color, flips);
 
-        return true;
+        return flips.Count > 0;
     }
 
     // the process of collecting the pieces that can be flipped in that direction(by one line)
@@ -145,11 +180,13 @@ public class ReversiScript : MonoBehaviour
         }
     }
 
-    private void PlaceAt(int x, int y)
+    private bool PlaceAt(int x, int y)
     {
         var flips = new List<(int, int)>();
         if (!CanPlaceAt(x, y, _PlayerTurn, flips))
-            return;
+            return false;
+
+        _FieldState[x, y] = _PlayerTurn;
 
         // flip and place
         foreach (var p in flips)
@@ -173,6 +210,10 @@ public class ReversiScript : MonoBehaviour
             // game over
             ResetBoard();
         }
+        RefreshSprites();
+        RefreshHighlights();
+
+        return true;
     }
 
     private bool HasLegalMove(spriteState color)
@@ -180,7 +221,7 @@ public class ReversiScript : MonoBehaviour
         var flips = new List<(int, int)>();
         for (int x = 0; x < FIELD_SIZE_X; x++)
             for (int y = 0; y < FIELD_SIZE_Y; y++)
-                if (CanPlaceAt(x, x, color, flips))
+                if (CanPlaceAt(x, y, color, flips))
                     return true;
         return false;
     }
@@ -238,5 +279,46 @@ public class ReversiScript : MonoBehaviour
         ApplyCubePosition();
         RefreshSprites();
     }
+
+    private void RefreshHighlights()
+    {
+        // Deactivate existing (Reuse)
+        foreach (var go in _highlights) go.SetActive(false);
+
+        var flips = new List<(int, int)>();
+        for (int x = 0; x < FIELD_SIZE_X; x++)
+            for (int y = 0; y < FIELD_SIZE_Y; y++)
+            {
+                // Check if placement is possible (reuse existing CanplaceAt)
+                if (_FieldState[x, y] == spriteState.None && CanPlaceAt(x, y, _PlayerTurn, flips))
+                {
+                    var pos = new Vector3(x * CUBE_STEP, CUBE_FIXED_Y + 0.1f, y * CUBE_STEP);
+
+                    // Generate if no objects remain in the pool
+                    GameObject go = null;
+                    for (int i = 0; i < _highlights.Count; i++)
+                        if (!_highlights[i].activeSelf)
+                        {
+                            go = _highlights[i]; 
+                            break;
+                        }
+
+                    if (go == null)
+                    {
+                        go = Instantiate(HighlightPrefab);
+                        _highlights.Add(go);
+                    }
+
+                    // Lay the quad flat on the XZ plane
+                    go.transform.SetPositionAndRotation(pos, Quaternion.Euler(90f, 0f, 0f));
+                    // A quad uses X and Y for size; Z is ignored
+                    go.transform.localScale = new Vector3(CUBE_STEP, CUBE_STEP, 1f);
+
+                    go.SetActive(true);
+                }
+            }
+    }
+
+
     #endregion
 }
