@@ -2,6 +2,7 @@
 using System.Runtime.CompilerServices;
 using UnityEngine;
 using UnityEngine.InputSystem;
+using TMPro;
 
 public class ReversiScript : MonoBehaviour
 {
@@ -10,6 +11,7 @@ public class ReversiScript : MonoBehaviour
     public GameObject ReversiSprite;
     public GameObject Cube;
     public GameObject HighlightPrefab;
+    public TextMeshProUGUI TurnText;
 
     private readonly List<GameObject> _highlights = new(); // pool
 
@@ -43,6 +45,8 @@ public class ReversiScript : MonoBehaviour
     // the piece object displayed on the screen
     private SpriteScript[,] _FieldSpriteState = new SpriteScript[FIELD_SIZE_X, FIELD_SIZE_Y];
 
+    private bool _gameover = false;
+
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Start()
     {
@@ -67,12 +71,27 @@ public class ReversiScript : MonoBehaviour
         ApplyCubePosition();
         RefreshSprites();
         RefreshHighlights();
+        UpdateTurnText();
     }
 
     // Update is called once per frame
     void Update()
     {
         var k = Keyboard.current;
+
+        if (_gameover)
+        {
+            if (k.rKey.wasPressedThisFrame)
+            {
+                ResetBoard();
+                _gameover = false;
+                RefreshSprites();
+                RefreshHighlights();
+                UpdateTurnText();
+            }
+            return;
+        }
+
         bool moved = false;
         bool placed = false;
 
@@ -112,10 +131,12 @@ public class ReversiScript : MonoBehaviour
         ApplyCubePosition();
         RefreshSprites();
 
-        // board is full (end of game)
-        var (w, b) = CountPieces();
-        if (w + b == FIELD_SIZE_X * FIELD_SIZE_Y)
-            ResetBoard();
+        if (placed)
+        {
+            RefreshHighlights();
+            UpdateTurnText();
+            CheckEndConditions();
+        }
     }
 
     #region Core
@@ -201,17 +222,8 @@ public class ReversiScript : MonoBehaviour
         bool meHas = HasLegalMove((_PlayerTurn == spriteState.Black) ? spriteState.White : spriteState.Black);
 
         if (!oppHas && meHas)
-        {
             // return the turn if the opp passes
             _PlayerTurn = (_PlayerTurn == spriteState.Black) ? spriteState.White : spriteState.Black;
-        }
-        else if (!oppHas && !meHas)
-        {
-            // game over
-            ResetBoard();
-        }
-        RefreshSprites();
-        RefreshHighlights();
 
         return true;
     }
@@ -224,6 +236,33 @@ public class ReversiScript : MonoBehaviour
                 if (CanPlaceAt(x, y, color, flips))
                     return true;
         return false;
+    }
+
+    private void CheckEndConditions()
+    {
+        bool blackHas = HasLegalMove(spriteState.Black);
+        bool whiteHas = HasLegalMove(spriteState.White);
+
+        var (w, b) = CountPieces();
+        int total = FIELD_SIZE_X * FIELD_SIZE_Y;
+        if ((!blackHas && !whiteHas) || w + b == total)
+            EndGame(w, b);
+    }
+
+    private void EndGame(int white, int black)
+    {
+        _gameover = true;
+
+        string msg =
+            (black > white) ? $"Black wins! B:{black} W:{white}" :
+            (white > black) ? $"White wins! W:{white} B:{black}" :
+            $"Draw! B:{black} W:{white}";
+
+        if (TurnText != null)
+            TurnText.text = msg + "  (Press R to Restart)";
+
+        // delete the highlight
+        foreach (var go in _highlights) go.SetActive(false);
     }
     #endregion
 
@@ -299,7 +338,7 @@ public class ReversiScript : MonoBehaviour
                     for (int i = 0; i < _highlights.Count; i++)
                         if (!_highlights[i].activeSelf)
                         {
-                            go = _highlights[i]; 
+                            go = _highlights[i];
                             break;
                         }
 
@@ -317,6 +356,13 @@ public class ReversiScript : MonoBehaviour
                     go.SetActive(true);
                 }
             }
+    }
+
+    private void UpdateTurnText()
+    {
+        if (TurnText == null) 
+            return;
+        TurnText.text = (_PlayerTurn == spriteState.Black) ? "Black Turn ●" : "White Turn ○";
     }
 
 
