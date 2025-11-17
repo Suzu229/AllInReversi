@@ -19,6 +19,9 @@ public class ReversiScript : MonoBehaviour
 
     public CanvasGroup GameOverCanvasGroup;
 
+    public AudioSource SfxSource;
+    public AudioClip PlaceClip;
+
     private readonly List<GameObject> _highlights = new(); // pool
 
     const int FIELD_SIZE_X = 8;
@@ -225,12 +228,17 @@ public class ReversiScript : MonoBehaviour
         _FieldState[x, y] = _PlayerTurn;
         _FieldSpriteState[x, y].SetState(_FieldState[x, y]);
 
+        if (SfxSource != null && PlaceClip != null)
+            SfxSource.PlayOneShot(PlaceClip);
+
         // flip and place
         foreach (var p in flips)
         {
             _FieldState[p.Item1, p.Item2] = _PlayerTurn;
             _FieldSpriteState[p.Item1, p.Item2].PlayFlip();
         }
+        if (flips.Count > 0 && SfxSource != null && PlaceClip != null)
+            SfxSource.PlayOneShot(PlaceClip);
 
         // switch turns
         _PlayerTurn = (_PlayerTurn == spriteState.Black) ? spriteState.White : spriteState.Black;
