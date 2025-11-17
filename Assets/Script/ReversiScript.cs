@@ -1,6 +1,7 @@
 ﻿using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using UnityEngine;
+using UnityEngine.UI;
 using UnityEngine.InputSystem;
 using TMPro;
 
@@ -11,7 +12,12 @@ public class ReversiScript : MonoBehaviour
     public GameObject ReversiSprite;
     public GameObject Cube;
     public GameObject HighlightPrefab;
+    public GameObject GameOverPanel;
+
     public TextMeshProUGUI TurnText;
+    public TextMeshProUGUI WinnerText;
+
+    public CanvasGroup GameOverCanvasGroup;
 
     private readonly List<GameObject> _highlights = new(); // pool
 
@@ -85,8 +91,17 @@ public class ReversiScript : MonoBehaviour
             {
                 ResetBoard();
                 _gameover = false;
+
+                if(GameOverPanel != null)
+                    GameOverPanel.SetActive(false);
+                if(GameOverCanvasGroup != null)
+                    GameOverCanvasGroup.alpha = 0f;
+
                 RefreshSprites();
                 RefreshHighlights();
+
+                if (TurnText != null)
+                    TurnText.gameObject.SetActive(true);
                 UpdateTurnText();
             }
             return;
@@ -129,7 +144,7 @@ public class ReversiScript : MonoBehaviour
             placed = PlaceAt(cube_gridX, cube_gridY);
 
         ApplyCubePosition();
-        RefreshSprites();
+        //RefreshSprites();
 
         if (placed)
         {
@@ -208,10 +223,14 @@ public class ReversiScript : MonoBehaviour
             return false;
 
         _FieldState[x, y] = _PlayerTurn;
+        _FieldSpriteState[x, y].SetState(_FieldState[x, y]);
 
         // flip and place
         foreach (var p in flips)
+        {
             _FieldState[p.Item1, p.Item2] = _PlayerTurn;
+            _FieldSpriteState[p.Item1, p.Item2].PlayFlip();
+        }
 
         // switch turns
         _PlayerTurn = (_PlayerTurn == spriteState.Black) ? spriteState.White : spriteState.Black;
@@ -254,12 +273,27 @@ public class ReversiScript : MonoBehaviour
         _gameover = true;
 
         string msg =
-            (black > white) ? $"Black wins! B:{black} W:{white}" :
-            (white > black) ? $"White wins! W:{white} B:{black}" :
-            $"Draw! B:{black} W:{white}";
+            (black > white) ? $"Black wins! \nB:{black} W:{white}\n" :
+            (white > black) ? $"White wins! \nW:{white} B:{black}\n" :
+            $"Draw! B:{black} W:{white}\n";
+
+        if(WinnerText != null)
+            WinnerText.text = msg + " (Press R to Restart)";
 
         if (TurnText != null)
-            TurnText.text = msg + "  (Press R to Restart)";
+            TurnText.gameObject.SetActive(false);
+
+        if (GameOverPanel != null)
+        {
+            GameOverPanel.SetActive(true);
+
+            // fade
+            if(GameOverCanvasGroup != null)
+            {
+                StopAllCoroutines();
+                StartCoroutine(FadeIn(GameOverCanvasGroup, 0f, 1f, 0.25f));
+            }
+        }
 
         // delete the highlight
         foreach (var go in _highlights) go.SetActive(false);
@@ -365,6 +399,25 @@ public class ReversiScript : MonoBehaviour
         TurnText.text = (_PlayerTurn == spriteState.Black) ? "Black Turn ●" : "White Turn ○";
     }
 
+    /// <summary>
+    /// Fades a CanvasGroup's alpha value over time.
+    /// </summary>
+    /// <param name="cg">The CanvasGroup to animate.</param>
+    /// <param name="from">Starting alpha value ( 0 = transparent, 1 = opaque). </param>
+    /// <param name="to">Ending alpha value.</param>
+    /// <param name="dur">Duration of the fade in seconds.</param>
+    /// <returns>Co-routine enumerator.</returns>
+    private System.Collections.IEnumerator FadeIn(CanvasGroup cg, float from,  float to, float dur)
+    {
+        cg.alpha = from;
+        float t = 0f;
+        while(t< dur){
+            t += Time.deltaTime;
+            cg.alpha = Mathf.Lerp(from, to , t/ dur);
+            yield return null;
+        }
+        cg.alpha = to;
+    }
 
     #endregion
 }
