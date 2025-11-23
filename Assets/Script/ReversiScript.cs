@@ -39,6 +39,10 @@ public class ReversiScript : MonoBehaviour
 
     int cube_gridX = 0, cube_gridY = 0;
 
+    private bool _isFlipped = false;
+    private float _flipTimer = 0; // Remaining Lock Time
+    private const float FLIP_DULATION = 0.2f;
+
     private static readonly (int dx, int dy)[] DIRS = new (int, int)[]
     {
         (-1,0), (1,0),(0,-1),(0,1),(1,1),(-1,-1),(-1,1),(1,-1)
@@ -91,6 +95,18 @@ public class ReversiScript : MonoBehaviour
     void Update()
     {
         var k = Keyboard.current;
+        var m = Mouse.current;
+
+        // Disable input while the animation is playing
+        if (_isFlipped)
+        {
+            _flipTimer -= Time.deltaTime;
+            if (_flipTimer <= 0f)
+                _isFlipped = false;
+            else
+                return;
+
+        }
 
         //**** for debug  ****
         if (k.pKey.wasPressedThisFrame)
@@ -147,24 +163,58 @@ public class ReversiScript : MonoBehaviour
         }
         #endregion
 
-        if (moved)
+        #region Mouse move & Click
+        if (m != null)
         {
+
+            // Cast a ray from the mouse position.
+            Ray ray = Camera.main.ScreenPointToRay(m.position.ReadValue());
+            if (Physics.Raycast(ray, out RaycastHit hit, 100f))
+            {
+                // Convert board world positions (x,z spaced by CUBE_STEP) into grid coordinates
+                int mx = Mathf.RoundToInt(hit.point.x / CUBE_STEP);
+                int my = Mathf.RoundToInt(hit.point.z / CUBE_STEP);
+
+                // Update only after confirming it's within the board boundaries
+                if (mx >= CUBE_MIN_X && mx <= CUBE_MAX_X && my >= CUBE_MIN_Y && my <= CUBE_MAX_Y)
+                {
+                    // Sync the keyboard cursor (cube_gridX/Y) with the mouse position
+                    if (mx != cube_gridX || my != cube_gridY)
+                    {
+                        cube_gridX = mx;
+                        cube_gridY = my;
+                        moved = true;
+                    }
+                    //Place a piece on the selected tile with a left mouse click
+                    if (m.leftButton.wasPressedThisFrame)
+                    {
+                        bool mousePlaced = PlaceAt(cube_gridX, cube_gridY);
+                        if (mousePlaced)
+                            placed = true;
+                    }
+                }
+            }
+            #endregion
+
+            if (moved)
+            {
+                ApplyCubePosition();
+                RefreshHighlights();
+            }
+
+            // place a piece
+            if (k.enterKey.wasPressedThisFrame || k.numpadEnterKey.wasPressedThisFrame)
+                placed = PlaceAt(cube_gridX, cube_gridY);
+
             ApplyCubePosition();
-            RefreshHighlights();
-        }
+            //RefreshSprites();
 
-        // place a piece
-        if (k.enterKey.wasPressedThisFrame || k.numpadEnterKey.wasPressedThisFrame)
-            placed = PlaceAt(cube_gridX, cube_gridY);
-
-        ApplyCubePosition();
-        //RefreshSprites();
-
-        if (placed)
-        {
-            RefreshHighlights();
-            UpdateTurnText();
-            CheckEndConditions();
+            if (placed)
+            {
+                RefreshHighlights();
+                UpdateTurnText();
+                CheckEndConditions();
+            }
         }
     }
 
@@ -251,6 +301,12 @@ public class ReversiScript : MonoBehaviour
         if (flips.Count > 0 && SfxSource != null && PlaceClip != null)
             SfxSource.PlayOneShot(PlaceClip);
 
+        if (flips.Count > 0)
+        {
+            _isFlipped = true;
+            _flipTimer = FLIP_DULATION;
+        }
+
         // switch turns
         _PlayerTurn = (_PlayerTurn == spriteState.Black) ? spriteState.White : spriteState.Black;
 
@@ -303,35 +359,32 @@ public class ReversiScript : MonoBehaviour
             $"Draw! B:{black} W:{white}\n";
 
         if (WinnerText != null)
-            WinnerText.text = msg + " (Press R to Restart)";
+            WinnerText.gameObject.SetActive(false);
 
         if (TurnText != null)
             TurnText.gameObject.SetActive(false);
 
         if (GameOverPanel != null)
         {
-            GameOverPanel.SetActive(true);
+            GameOverPanel.SetActive(false);
 
             // fade
             if (GameOverCanvasGroup != null)
-            {
-                StopAllCoroutines();
-                StartCoroutine(FadeIn(GameOverCanvasGroup, 0f, 1f, 0.25f));
-            }
+                GameOverCanvasGroup.alpha = 0f;
         }
 
         // delete the highlight
         foreach (var go in _highlights) go.SetActive(false);
 
         // Reorder pieces for display count
-        StartCoroutine(ArrangePiecesForScore(white, black));
+        StartCoroutine(ArrangePiecesForScore(white, black, msg));
     }
 
     /// <summary>
     /// After the match, black stones are lined up from the lower right toward the left,
     /// white stones are lined up from upper left toward the right.
     /// </summary>
-    private IEnumerator ArrangePiecesForScore(int white, int black)
+    private IEnumerator ArrangePiecesForScore(int white, int black, string resultMessage)
     {
         var list = new List<SpriteScript>();
 
@@ -362,11 +415,15 @@ public class ReversiScript : MonoBehaviour
                 s.SetState(spriteState.Black);
 
                 if (SfxSource != null && PlaceClip != null)
+                {
+                    SfxSource.Stop();
                     SfxSource.PlayOneShot(PlaceClip);
+                    SfxSource.Play();
+                }
             }
 
             // white
-            if (i < white && index<list.Count)
+            if (i < white && index < list.Count)
             {
                 int row = i / FIELD_SIZE_X;          // row 0 represents the top row
                 int col = i % FIELD_SIZE_X;          // left -> right
@@ -378,9 +435,30 @@ public class ReversiScript : MonoBehaviour
                 s.SetState(spriteState.White);
 
                 if (SfxSource != null && PlaceClip != null)
+                {
+                    SfxSource.Stop();
                     SfxSource.PlayOneShot(PlaceClip);
+                    SfxSource.Play();
+                }
             }
             yield return new WaitForSeconds(interval);
+        }
+
+        if (GameOverPanel != null)
+            GameOverPanel.SetActive(true);
+
+        if (GameOverCanvasGroup != null)
+        {
+            GameOverCanvasGroup.alpha = 0f;
+            StartCoroutine(FadeIn(GameOverCanvasGroup, 0f, 1f, 0.25f));
+        }
+
+        for (; index < list.Count; index++)
+            list[index].SetState(spriteState.None);
+        if (WinnerText != null)
+        {
+            WinnerText.text = resultMessage + " (Press R to Restart)";
+            WinnerText.gameObject.SetActive(true);
         }
     }
 
