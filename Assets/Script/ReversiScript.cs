@@ -1,9 +1,12 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections;
+using System.Collections.Generic;
 using System.Runtime.CompilerServices;
-using UnityEngine;
-using UnityEngine.UI;
-using UnityEngine.InputSystem;
 using TMPro;
+using UnityEditor.Search;
+using UnityEngine;
+using UnityEngine.InputSystem;
+using UnityEngine.UI;
 
 public class ReversiScript : MonoBehaviour
 {
@@ -16,6 +19,7 @@ public class ReversiScript : MonoBehaviour
 
     public TextMeshProUGUI TurnText;
     public TextMeshProUGUI WinnerText;
+    public TextMeshProUGUI PassText;
 
     public CanvasGroup GameOverCanvasGroup;
 
@@ -88,6 +92,13 @@ public class ReversiScript : MonoBehaviour
     {
         var k = Keyboard.current;
 
+        //**** for debug  ****
+        if (k.pKey.wasPressedThisFrame)
+        {
+            SetupDebug();
+            return;
+        }
+
         if (_gameover)
         {
             if (k.rKey.wasPressedThisFrame)
@@ -95,9 +106,9 @@ public class ReversiScript : MonoBehaviour
                 ResetBoard();
                 _gameover = false;
 
-                if(GameOverPanel != null)
+                if (GameOverPanel != null)
                     GameOverPanel.SetActive(false);
-                if(GameOverCanvasGroup != null)
+                if (GameOverCanvasGroup != null)
                     GameOverCanvasGroup.alpha = 0f;
 
                 RefreshSprites();
@@ -249,8 +260,14 @@ public class ReversiScript : MonoBehaviour
         bool meHas = HasLegalMove((_PlayerTurn == spriteState.Black) ? spriteState.White : spriteState.Black);
 
         if (!oppHas && meHas)
+        {
+            spriteState PassedColor = _PlayerTurn;
             // return the turn if the opp passes
             _PlayerTurn = (_PlayerTurn == spriteState.Black) ? spriteState.White : spriteState.Black;
+
+            // show message
+            ShowPassMessage(PassedColor);
+        }
 
         return true;
     }
@@ -285,7 +302,7 @@ public class ReversiScript : MonoBehaviour
             (white > black) ? $"White wins! \nW:{white} B:{black}\n" :
             $"Draw! B:{black} W:{white}\n";
 
-        if(WinnerText != null)
+        if (WinnerText != null)
             WinnerText.text = msg + " (Press R to Restart)";
 
         if (TurnText != null)
@@ -296,7 +313,7 @@ public class ReversiScript : MonoBehaviour
             GameOverPanel.SetActive(true);
 
             // fade
-            if(GameOverCanvasGroup != null)
+            if (GameOverCanvasGroup != null)
             {
                 StopAllCoroutines();
                 StartCoroutine(FadeIn(GameOverCanvasGroup, 0f, 1f, 0.25f));
@@ -305,7 +322,68 @@ public class ReversiScript : MonoBehaviour
 
         // delete the highlight
         foreach (var go in _highlights) go.SetActive(false);
+
+        // Reorder pieces for display count
+        StartCoroutine(ArrangePiecesForScore(white, black));
     }
+
+    /// <summary>
+    /// After the match, black stones are lined up from the lower right toward the left,
+    /// white stones are lined up from upper left toward the right.
+    /// </summary>
+    private IEnumerator ArrangePiecesForScore(int white, int black)
+    {
+        var list = new List<SpriteScript>();
+
+        for (int x = 0; x < FIELD_SIZE_X; x++)
+            for (int y = 0; y < FIELD_SIZE_Y; y++)
+            {
+                var s = _FieldSpriteState[x, y];
+                s.SetState(spriteState.None);
+                list.Add(s);
+            }
+
+        int index = 0;
+        float interval = 0.1f;
+        int maxCount = Mathf.Max(black, white);
+
+        for (int i = 0; i < maxCount; i++)
+        {
+            // black
+            if (i < black && index < list.Count)
+            {
+                int row = i / FIELD_SIZE_X;            // row 0 represents the bottom row
+                int colInRow = i % FIELD_SIZE_X;       // convert indices 0,1,2,... to their leftward positions
+                int x = (FIELD_SIZE_X - 1) - colInRow; // 7,6,5,... 0
+                int y = row;                           // Map bottom(0) to top (0,1,2...)
+
+                var s = list[index++];
+                s.transform.localPosition = new Vector3(x * CUBE_STEP, 0f, y * CUBE_STEP);
+                s.SetState(spriteState.Black);
+
+                if (SfxSource != null && PlaceClip != null)
+                    SfxSource.PlayOneShot(PlaceClip);
+            }
+
+            // white
+            if (i < white && index<list.Count)
+            {
+                int row = i / FIELD_SIZE_X;          // row 0 represents the top row
+                int col = i % FIELD_SIZE_X;          // left -> right
+                int x = col;                         // 0,1,2,...7
+                int y = (FIELD_SIZE_Y - 1) - row;    // Map top(7) to bottom (6,5,...)
+
+                var s = list[index++];
+                s.transform.localPosition = new Vector3(x * CUBE_STEP, 0f, y * CUBE_STEP);
+                s.SetState(spriteState.White);
+
+                if (SfxSource != null && PlaceClip != null)
+                    SfxSource.PlayOneShot(PlaceClip);
+            }
+            yield return new WaitForSeconds(interval);
+        }
+    }
+
     #endregion
 
     #region View / Utility
@@ -344,7 +422,10 @@ public class ReversiScript : MonoBehaviour
     {
         for (int x = 0; x < FIELD_SIZE_X; x++)
             for (int y = 0; y < FIELD_SIZE_Y; y++)
+            {
                 _FieldState[x, y] = spriteState.None;
+                _FieldSpriteState[x, y].transform.localPosition = new Vector3(CUBE_STEP * x, 0f, CUBE_STEP * y);
+            }
 
 
         _FieldState[3, 3] = spriteState.Black;
@@ -402,9 +483,19 @@ public class ReversiScript : MonoBehaviour
 
     private void UpdateTurnText()
     {
-        if (TurnText == null) 
+        if (TurnText == null)
             return;
-        TurnText.text = (_PlayerTurn == spriteState.Black) ? "Black Turn ●" : "White Turn ○";
+
+        if (_PlayerTurn == spriteState.Black)
+        {
+            TurnText.text = "Black Turn ●";
+            TurnText.color = Color.black;
+        }
+        if (_PlayerTurn == spriteState.White)
+        {
+            TurnText.text = "White Turn ●";
+            TurnText.color = Color.white;
+        }
     }
 
     /// <summary>
@@ -415,16 +506,65 @@ public class ReversiScript : MonoBehaviour
     /// <param name="to">Ending alpha value.</param>
     /// <param name="dur">Duration of the fade in seconds.</param>
     /// <returns>Co-routine enumerator.</returns>
-    private System.Collections.IEnumerator FadeIn(CanvasGroup cg, float from,  float to, float dur)
+    private System.Collections.IEnumerator FadeIn(CanvasGroup cg, float from, float to, float dur)
     {
         cg.alpha = from;
         float t = 0f;
-        while(t< dur){
+        while (t < dur)
+        {
             t += Time.deltaTime;
-            cg.alpha = Mathf.Lerp(from, to , t/ dur);
+            cg.alpha = Mathf.Lerp(from, to, t / dur);
             yield return null;
         }
         cg.alpha = to;
+    }
+
+    private void ShowPassMessage(spriteState passedColor)
+    {
+        if (PassText == null)
+            return;
+
+        string msg = (passedColor == spriteState.White) ? "White Pass" : "Black Pass";
+
+        PassText.text = msg;
+        PassText.gameObject.SetActive(true);
+
+        StartCoroutine(HideMessage());
+
+    }
+
+    private IEnumerator HideMessage()
+    {
+        yield return new WaitForSeconds(1f);
+        PassText.gameObject.SetActive(false);
+    }
+
+    #endregion
+
+    #region DEBUG
+    // For debugging: set your preferred layout
+    private void SetupDebug()
+    {
+        for (int x = 0; x < FIELD_SIZE_X; x++)
+            for (int y = 0; y < FIELD_SIZE_Y; y++)
+                _FieldState[x, y] = spriteState.None;
+
+        _FieldState[4, 4] = spriteState.Black;
+        _FieldState[5, 4] = spriteState.Black;
+
+        _FieldState[6, 4] = spriteState.Black;
+        _FieldState[7, 4] = spriteState.White;
+
+
+        _PlayerTurn = spriteState.Black;
+
+        cube_gridX = 5;
+        cube_gridY = 4;
+
+        ApplyCubePosition();
+        RefreshSprites();
+        RefreshHighlights();
+        UpdateTurnText();
     }
 
     #endregion
